@@ -595,6 +595,18 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
+	// create table data
+	rows, err := db.Query(`SELECT name FROM users`)
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		err := rows.Scan(&name)
+		friends, err := loadFriends(name)
+		for _, friend := range friends {
+			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
+		}
+	}
+
 	re = render.New(render.Options{
 		Directory: "views",
 		Funcs: []template.FuncMap{
