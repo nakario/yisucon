@@ -596,12 +596,12 @@ func main() {
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
 	// create table data
-	rows, err := db.Query(`SELECT name FROM users`)
+	rows, _ := db.Query(`SELECT name FROM users`)
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		err := rows.Scan(&name)
-		friends, err := loadFriends(name)
+		_ = rows.Scan(&name)
+		friends, _ := loadFriends(name)
 		for _, friend := range friends {
 			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
 		}
