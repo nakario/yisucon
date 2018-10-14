@@ -67,13 +67,10 @@ func getuserID(name string) int {
 }
 
 func getUserName(id int) string {
-	row := db.QueryRow(`SELECT name FROM users WHERE id = ?`, id)
-	user := User{}
-	err := row.Scan(&user.Name)
-	if err != nil {
+	if id <= 0 || id > len(users) {
 		return ""
 	}
-	return user.Name
+	return users[id-1].Name
 }
 
 func htmlify(tweet string) string {
