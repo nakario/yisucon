@@ -618,14 +618,15 @@ func main() {
 		}
 	}*/
 	// create table data
-	rows, err := db.Query(`SELECT id FROM users`)
+	rows, err := db.Query(`SELECT id, name FROM users`)
 	if err != nil {
 		log.Fatalln("select error")
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		err = rows.Scan(&id)
+		var name string
+		err = rows.Scan(&id, &name)
 		if err != nil {
 			log.Fatalln("scan error")
 		}
