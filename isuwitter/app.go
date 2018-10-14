@@ -1,18 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
-	"html/template"
 	"log"
 	"net/http"
 	"net/http/pprof"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -42,17 +37,15 @@ type User struct {
 }
 
 const (
-	sessionName     = "isuwitter_session"
-	sessionSecret   = "isuwitter"
-	perPage         = 50
-	isutomoEndpoint = "http://localhost:8081"
+	sessionName   = "isuwitter_session"
+	sessionSecret = "isuwitter"
+	perPage       = 50
 )
 
 var (
-	re             *render.Render
-	store          *sessions.FilesystemStore
-	db             *sql.DB
-	errInvalidUser = errors.New("Invalid User")
+	re    *render.Render
+	store *sessions.FilesystemStore
+	db    *sql.DB
 )
 
 func getuserID(name string) int {
@@ -78,7 +71,7 @@ func replaceHashtag(tweet string) string {
 	x := ""
 	for si, s := range ss[1:] {
 		i := strings.IndexAny(s, "\t\n\f\r ")
-		if si == len(ss) - 2 {
+		if si == len(ss)-2 {
 			i = len(s)
 		} else if i == -1 {
 			x = s + "#"
@@ -107,20 +100,6 @@ func htmlify(tweet string) string {
 	return tweet
 }
 
-func loadFriends(name string) ([]string, error) {
-	resp, err := http.DefaultClient.Get(isutomoEndpoint + pathURIEscape("/"+name))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var data struct {
-		Result []string `json:"friends"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&data)
-	return data.Result, err
-}
-
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := db.Exec(`DELETE FROM tweets WHERE id > 100000`)
 	if err != nil {
@@ -133,13 +112,6 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
 		return
 	}
-
-	resp, err := http.Get(fmt.Sprintf("%s/initialize", isutomoEndpoint))
-	if err != nil {
-		badRequest(w)
-		return
-	}
-	defer resp.Body.Close()
 
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})
 }
@@ -157,48 +129,52 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		session := getSession(w, r)
 		session.Options = &sessions.Options{MaxAge: -1}
 		session.Save(r, w)
-
-		re.HTML(w, http.StatusOK, "index", struct {
-			Name  string
-			Flush string
-		}{
-			name,
-			flush,
-		})
+		indexTmpl(w,name,make([]*Tweet,0),flush)
 		return
+	}
+
+	var tx *sql.Tx
+	var err error
+	i := 0
+	tweets := make([]*Tweet, 0, perPage)
+	for {
+		tx, err = db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				log.Println(err)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+		break
 	}
 
 	until := r.URL.Query().Get("until")
 	var rows *sql.Rows
-	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC`)
+		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC`, until)
+		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
 	}
 
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.NotFound(w, r)
-			return
-		}
+	if err != nil && err != sql.ErrNoRows {
+		tx.Rollback()
 		badRequest(w)
-		return
-	}
-	defer rows.Close()
-
-	result, err := loadFriends(name)
-	if err != nil {
-		badRequest(w)
+		log.Println(err)
 		return
 	}
 
-	tweets := make([]*Tweet, 0)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
 		if err != nil && err != sql.ErrNoRows {
+			tx.Rollback()
 			badRequest(w)
+			log.Println(err)
 			return
 		}
 		t.HTML = htmlify(t.Text)
@@ -206,44 +182,94 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 
 		t.UserName = getUserName(t.UserID)
 		if t.UserName == "" {
+			tx.Rollback()
 			badRequest(w)
+			log.Println(err)
+			return
+		}
+		tweets = append(tweets, &t)
+	}
+	rows.Close()
+
+	if len(tweets) < perPage {
+		var rows2 *sql.Rows
+		if until == "" {
+			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id ORDER BY tw.id DESC LIMIT ?`, userID, perPage)
+		} else {
+			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id AND tw.created_at < ? ORDER BY tw.id DESC LIMIT ?`, userID, until, perPage)
+		}
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				if tx.Commit() != nil {
+					badRequest(w)
+					log.Println(err)
+					return
+				}
+				http.NotFound(w, r)
+				return
+			}
+			tx.Rollback()
+			badRequest(w)
+			log.Println(err)
 			return
 		}
 
-		for _, x := range result {
-			if x == t.UserName {
-				tweets = append(tweets, &t)
-				break
+		tweets = make([]*Tweet, 0, perPage)
+		for rows2.Next() {
+			t := Tweet{}
+			err := rows2.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
+			if err != nil && err != sql.ErrNoRows {
+				tx.Rollback()
+				badRequest(w)
+				log.Println(err)
+				return
+			}
+			t.HTML = htmlify(t.Text)
+			t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
+
+			t.UserName = getUserName(t.UserID)
+			if t.UserName == "" {
+				tx.Rollback()
+				badRequest(w)
+				log.Println(err)
+				return
+			}
+			tweets = append(tweets, &t)
+		}
+		rows2.Close()
+
+		for _, t := range tweets {
+			_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, userID, t.UserID, t.ID)
+			if err != nil {
+				tx.Rollback()
+				badRequest(w)
+				log.Println(err)
+				return
 			}
 		}
-		if len(tweets) == perPage {
-			break
-		}
+	}
+
+	if tx.Commit() != nil {
+		badRequest(w)
+		log.Println(err)
+		return
 	}
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
-
-	re.HTML(w, http.StatusOK, "index", struct {
-		Name   string
-		Tweets []*Tweet
-	}{
-		name, tweets,
-	})
+	indexTmpl(w,name,tweets,"")
 }
 
 func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
+	var u string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
-		u := getUserName(userID.(int))
+		u = getUserName(userID.(int))
 		if u == "" {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -259,8 +285,51 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
+	var tx *sql.Tx
+	var err error
+	i := 0
+	for {
+		tx, err = db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				log.Println(err)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+		break
+	}
+
+	res, err := tx.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
 	if err != nil {
+		log.Println(err)
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		log.Println(err)
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
+
+	_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.dst = ?`, id, userID)
+	if err != nil {
+		log.Println(err)
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
+
+	if tx.Commit() != nil {
+		log.Println(err)
 		badRequest(w)
 		return
 	}
@@ -298,7 +367,6 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func followHandler(w http.ResponseWriter, r *http.Request) {
-	var userName string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
@@ -307,23 +375,47 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		userName = u
 	} else {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 
-	jsonStr := `{"user":"` + r.FormValue("user") + `"}`
-	req, err := http.NewRequest(http.MethodPost, isutomoEndpoint+pathURIEscape("/"+userName), bytes.NewBuffer([]byte(jsonStr)))
+	followUser := r.FormValue("user")
+	followID := getuserID(followUser)
 
+	var tx *sql.Tx
+	var err error
+	i := 0
+	for {
+		tx, err = db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+		break
+	}
+
+	_, err = tx.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userID, followID)
 	if err != nil {
 		badRequest(w)
+		tx.Rollback()
 		return
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT ?, ?, tweets.id FROM tweets WHERE tweets.user_id = ?`, userID, followID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
 
-	if err != nil || resp.StatusCode != 200 {
+	if tx.Commit() != nil {
 		badRequest(w)
 		return
 	}
@@ -332,7 +424,6 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func unfollowHandler(w http.ResponseWriter, r *http.Request) {
-	var userName string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
@@ -341,23 +432,46 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		userName = u
 	} else {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 
-	jsonStr := `{"user":"` + r.FormValue("user") + `"}`
-	req, err := http.NewRequest(http.MethodDelete, isutomoEndpoint+pathURIEscape("/"+userName), bytes.NewBuffer([]byte(jsonStr)))
+	followID := getuserID(r.FormValue("user"))
 
+	var tx *sql.Tx
+	var err error
+	i := 0
+	for {
+		tx, err = db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+		break
+	}
+
+	_, err = tx.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userID, followID)
 	if err != nil {
 		badRequest(w)
+		tx.Rollback()
 		return
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	_, err = tx.Exec(`DELETE FROM timelines WHERE me = ? AND postuser = ?`, userID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
 
-	if err != nil || resp.StatusCode != 200 {
+	if tx.Commit() != nil {
 		badRequest(w)
 		return
 	}
@@ -369,10 +483,6 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 	session, _ := store.Get(r, sessionName)
 
 	return session
-}
-
-func pathURIEscape(s string) string {
-	return (&url.URL{Path: s}).String()
 }
 
 func badRequest(w http.ResponseWriter) {
@@ -401,27 +511,16 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	isFriend := false
 	if name != "" {
-		result, err := loadFriends(name)
-		if err != nil {
-			badRequest(w)
-			return
-		}
-
-		for _, x := range result {
-			if x == user {
-				isFriend = true
-				break
-			}
-		}
+		db.QueryRow(`SELECT EXISTS(SELECT * FROM follows WHERE src = ? AND dst = ? LIMIT 1)`, sessionUID, userID).Scan(&isFriend)
 	}
 
 	until := r.URL.Query().Get("until")
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY created_at DESC`, userID)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY id DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY created_at DESC`, userID, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY id DESC LIMIT 50`, userID, until)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -433,7 +532,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tweets := make([]*Tweet, 0)
+	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
@@ -445,31 +544,15 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
 		t.UserName = user
 		tweets = append(tweets, &t)
-
-		if len(tweets) == perPage {
-			break
-		}
 	}
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
 
-	re.HTML(w, http.StatusOK, "user", struct {
-		Name     string
-		User     string
-		Tweets   []*Tweet
-		IsFriend bool
-		Mypage   bool
-	}{
-		name, user, tweets, isFriend, mypage,
-	})
+	userTmpl(w,name, user, tweets, isFriend, mypage)
 }
 
 func searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -504,7 +587,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tweets := make([]*Tweet, 0)
+	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
@@ -530,21 +613,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
-
-	re.HTML(w, http.StatusOK, "search", struct {
-		Name   string
-		Tweets []*Tweet
-		Query  string
-	}{
-		name, tweets, query,
-	})
+	searchTmpl(w,name, tweets, query)
 }
 
 func js(w http.ResponseWriter, r *http.Request) {
@@ -584,6 +656,7 @@ func fileRead(fp string) []byte {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	host := os.Getenv("ISUWITTER_DB_HOST")
 	if host == "" {
 		host = "localhost"
@@ -613,17 +686,7 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
-	re = render.New(render.Options{
-		Directory: "views",
-		Funcs: []template.FuncMap{
-			{
-				"raw": func(text string) template.HTML {
-					return template.HTML(text)
-				},
-				"add": func(a, b int) int { return a + b },
-			},
-		},
-	})
+	re = render.New()
 
 	r := mux.NewRouter()
 
