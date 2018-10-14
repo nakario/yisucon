@@ -595,26 +595,29 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
-	// create table data
-	rows, err := db.Query(`SELECT name FROM users`)
+	rows, err := db.Query(`SELECT id, user_id FROM tweets`)
 	if err != nil {
 		log.Fatalln("select error")
 	}
-	defer rows.Close()
 	for rows.Next() {
-		var name string
-		err = rows.Scan(&name)
+		t := Tweet{}
+		err = rows.Scan(&t.ID, &t.UserID)
 		if err != nil {
 			log.Fatalln("scan error")
 		}
-		friends, err := loadFriends(name)
-		if err != nil {
-			log.Fatalln("loadFriends error")
-		}
-		for _, friend := range friends {
-			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
+		db.QueryRow(`SELECT name FROM users where id = ?`, user_id).Scan(&t.UserName)
+
+		followers, err := db.Query(`SELECT src FROM follows where dst = ?`, t.UserName)
+		for followers.Next() {
+			var follow string
+			err = rows.Scan(&follow)
+			if err != nil {
+				log.Fatalln("scan error")
+			}
+			db.Exec(`INSERT INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, follow, t.UserName, t.ID)
 		}
 	}
+	defer rows.Close()
 
 	re = render.New(render.Options{
 		Directory: "views",
