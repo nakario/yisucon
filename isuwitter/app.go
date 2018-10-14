@@ -151,9 +151,9 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC limit ?`, perPage)
+		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC limit ?`, perPage+2)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage+2)
 	}
 
 	if err != nil {
@@ -470,9 +470,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC limit ?`, perPage)
+		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC limit ?`, perPage+2)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage+2)
 	}
 	// hogehoge
 	if err != nil {
