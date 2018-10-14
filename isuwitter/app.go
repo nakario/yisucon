@@ -3,14 +3,12 @@ package main
 import (
 	"crypto/sha1"
 	"database/sql"
-	"errors"
 	"fmt"
 	"html"
 	"html/template"
 	"log"
 	"net/http"
 	"net/http/pprof"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -42,14 +40,12 @@ type User struct {
 const (
 	sessionName     = "isuwitter_session"
 	sessionSecret   = "isuwitter"
-	perPage         = 50
 )
 
 var (
 	re             *render.Render
 	store          *sessions.FilesystemStore
 	db             *sql.DB
-	errInvalidUser = errors.New("Invalid User")
 )
 
 func getuserID(name string) int {
@@ -312,10 +308,6 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 	session, _ := store.Get(r, sessionName)
 
 	return session
-}
-
-func pathURIEscape(s string) string {
-	return (&url.URL{Path: s}).String()
 }
 
 func badRequest(w http.ResponseWriter) {
