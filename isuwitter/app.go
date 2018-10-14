@@ -610,7 +610,7 @@ func main() {
 		followers, err := db.Query(`SELECT src FROM follows where dst = ?`, t.UserName)
 		for followers.Next() {
 			var follow string
-			err = rows.Scan(&follow)
+			err = followers.Scan(&follow)
 			if err != nil {
 				log.Fatalln("scan2 error")
 			}
