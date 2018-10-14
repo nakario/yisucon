@@ -14,7 +14,6 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -73,16 +72,38 @@ func getUserName(id int) string {
 	return users[id-1].Name
 }
 
+func replaceHashtag(tweet string) string {
+	ss := strings.Split(tweet, "#")
+	ret := ss[0]
+	x := ""
+	for si, s := range ss[1:] {
+		i := strings.IndexAny(s, "\t\n\f\r ")
+		if si == len(ss) - 2 {
+			i = len(s)
+		} else if i == -1 {
+			x = s + "#"
+			continue
+		} else {
+			i += 1
+		}
+		tag := "#"
+		if i > 0 {
+			tagName := x + s[:i]
+			tag = fmt.Sprintf("<a class=\"hashtag\" href=\"/hashtag/%s\">#%s</a>", tagName, html.EscapeString(tagName))
+		}
+		ret += tag + s[i:]
+		x = ""
+	}
+	return ret
+}
+
 func htmlify(tweet string) string {
 	tweet = strings.Replace(tweet, "&", "&amp;", -1)
 	tweet = strings.Replace(tweet, "<", "&lt;", -1)
 	tweet = strings.Replace(tweet, ">", "&gt;", -1)
 	tweet = strings.Replace(tweet, "'", "&apos;", -1)
 	tweet = strings.Replace(tweet, "\"", "&quot;", -1)
-	re := regexp.MustCompile("#(\\S+)(\\s|$)")
-	tweet = re.ReplaceAllStringFunc(tweet, func(tag string) string {
-		return fmt.Sprintf("<a class=\"hashtag\" href=\"/hashtag/%s\">#%s</a>", tag[1:len(tag)], html.EscapeString(tag[1:len(tag)]))
-	})
+	tweet = replaceHashtag(tweet)
 	return tweet
 }
 
