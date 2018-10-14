@@ -38,25 +38,19 @@ type User struct {
 }
 
 const (
-	sessionName     = "isuwitter_session"
-	sessionSecret   = "isuwitter"
-	perPage         = 50
+	sessionName   = "isuwitter_session"
+	sessionSecret = "isuwitter"
+	perPage       = 50
 )
 
 var (
-	re             *render.Render
-	store          *sessions.FilesystemStore
-	db             *sql.DB
+	re    *render.Render
+	store *sessions.FilesystemStore
+	db    *sql.DB
 )
 
 func getuserID(name string) int {
-	row := db.QueryRow(`SELECT id FROM users WHERE name = ?`, name)
-	user := User{}
-	err := row.Scan(&user.ID)
-	if err != nil {
-		return 0
-	}
-	return user.ID
+	return idFromName[name]
 }
 
 func getUserName(id int) string {
@@ -72,7 +66,7 @@ func replaceHashtag(tweet string) string {
 	x := ""
 	for si, s := range ss[1:] {
 		i := strings.IndexAny(s, "\t\n\f\r ")
-		if si == len(ss) - 2 {
+		if si == len(ss)-2 {
 			i = len(s)
 		} else if i == -1 {
 			x = s + "#"
