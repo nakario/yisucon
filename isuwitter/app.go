@@ -38,15 +38,15 @@ type User struct {
 }
 
 const (
-	sessionName     = "isuwitter_session"
-	sessionSecret   = "isuwitter"
-	perPage         = 50
+	sessionName   = "isuwitter_session"
+	sessionSecret = "isuwitter"
+	perPage       = 50
 )
 
 var (
-	re             *render.Render
-	store          *sessions.FilesystemStore
-	db             *sql.DB
+	re    *render.Render
+	store *sessions.FilesystemStore
+	db    *sql.DB
 )
 
 func getuserID(name string) int {
@@ -72,7 +72,7 @@ func replaceHashtag(tweet string) string {
 	x := ""
 	for si, s := range ss[1:] {
 		i := strings.IndexAny(s, "\t\n\f\r ")
-		if si == len(ss) - 2 {
+		if si == len(ss)-2 {
 			i = len(s)
 		} else if i == -1 {
 			x = s + "#"
@@ -152,11 +152,13 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			i++
 			if i > 10 {
 				badRequest(w)
+				log.Println(err)
 				return
 			}
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+		break
 	}
 
 	until := r.URL.Query().Get("until")
@@ -167,20 +169,12 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
 	}
 
-	if err != nil {
-		if err == sql.ErrNoRows {
-			if tx.Commit() != nil {
-				badRequest(w)
-				return
-			}
-			http.NotFound(w, r)
-			return
-		}
+	if err != nil && err != sql.ErrNoRows {
 		tx.Rollback()
 		badRequest(w)
+		log.Println(err)
 		return
 	}
-	defer rows.Close()
 
 	for rows.Next() {
 		t := Tweet{}
@@ -188,6 +182,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil && err != sql.ErrNoRows {
 			tx.Rollback()
 			badRequest(w)
+			log.Println(err)
 			return
 		}
 		t.HTML = htmlify(t.Text)
@@ -197,10 +192,12 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		if t.UserName == "" {
 			tx.Rollback()
 			badRequest(w)
+			log.Println(err)
 			return
 		}
 		tweets = append(tweets, &t)
 	}
+	rows.Close()
 
 	if len(tweets) < perPage {
 		var rows2 *sql.Rows
@@ -214,6 +211,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			if err == sql.ErrNoRows {
 				if tx.Commit() != nil {
 					badRequest(w)
+					log.Println(err)
 					return
 				}
 				http.NotFound(w, r)
@@ -221,9 +219,9 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			tx.Rollback()
 			badRequest(w)
+			log.Println(err)
 			return
 		}
-		defer rows2.Close()
 
 		tweets = make([]*Tweet, 0, perPage)
 		for rows2.Next() {
@@ -232,6 +230,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil && err != sql.ErrNoRows {
 				tx.Rollback()
 				badRequest(w)
+				log.Println(err)
 				return
 			}
 			t.HTML = htmlify(t.Text)
@@ -241,14 +240,19 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			if t.UserName == "" {
 				tx.Rollback()
 				badRequest(w)
+				log.Println(err)
 				return
 			}
 			tweets = append(tweets, &t)
+		}
+		rows2.Close()
 
+		for _, t := range tweets {
 			_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, userID, t.UserID, t.ID)
 			if err != nil {
 				tx.Rollback()
 				badRequest(w)
+				log.Println(err)
 				return
 			}
 		}
@@ -256,6 +260,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 
 	if tx.Commit() != nil {
 		badRequest(w)
+		log.Println(err)
 		return
 	}
 
@@ -313,6 +318,7 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+		break
 	}
 
 	res, err := tx.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
@@ -405,6 +411,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+		break
 	}
 
 	_, err = tx.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userID, followID)
@@ -460,6 +467,7 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+		break
 	}
 
 	_, err = tx.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userID, followID)
@@ -685,6 +693,7 @@ func fileRead(fp string) []byte {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	host := os.Getenv("ISUWITTER_DB_HOST")
 	if host == "" {
 		host = "localhost"
