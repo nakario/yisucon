@@ -313,6 +313,7 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 			i++
 			if i > 10 {
 				badRequest(w)
+				log.Println(err)
 				return
 			}
 			log.Println("Failed to get tx. continue...")
@@ -323,6 +324,7 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	res, err := tx.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
 	if err != nil {
+		log.Println(err)
 		badRequest(w)
 		tx.Rollback()
 		return
@@ -330,19 +332,22 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := res.LastInsertId()
 	if err != nil {
+		log.Println(err)
 		badRequest(w)
 		tx.Rollback()
 		return
 	}
 
-	_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.src = ?`, id, userID)
+	_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.dst = ?`, id, userID)
 	if err != nil {
+		log.Println(err)
 		badRequest(w)
 		tx.Rollback()
 		return
 	}
 
 	if tx.Commit() != nil {
+		log.Println(err)
 		badRequest(w)
 		return
 	}
