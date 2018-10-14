@@ -49,13 +49,7 @@ var (
 )
 
 func getuserID(name string) int {
-	row := db.QueryRow(`SELECT id FROM users WHERE name = ?`, name)
-	user := User{}
-	err := row.Scan(&user.ID)
-	if err != nil {
-		return 0
-	}
-	return user.ID
+	return idFromName[name]
 }
 
 func getUserName(id int) string {
@@ -129,7 +123,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		session := getSession(w, r)
 		session.Options = &sessions.Options{MaxAge: -1}
 		session.Save(r, w)
-		indexTmpl(w,name,make([]*Tweet,0),flush)
+		indexTmpl(w, name, make([]*Tweet, 0), flush)
 		return
 	}
 
@@ -258,10 +252,10 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		tweetsTmpl(w,tweets)
+		tweetsTmpl(w, tweets)
 		return
 	}
-	indexTmpl(w,name,tweets,"")
+	indexTmpl(w, name, tweets, "")
 }
 
 func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -548,11 +542,11 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		tweetsTmpl(w,tweets)
+		tweetsTmpl(w, tweets)
 		return
 	}
 
-	userTmpl(w,name, user, tweets, isFriend, mypage)
+	userTmpl(w, name, user, tweets, isFriend, mypage)
 }
 
 func searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -574,7 +568,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE text LIKE CONCAT('%',?,'%') ORDER BY created_at DESC LIMIT 50`,query)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE text LIKE CONCAT('%',?,'%') ORDER BY created_at DESC LIMIT 50`, query)
 	} else {
 		rows, err = db.Query(`SELECT * FROM tweets WHERE text LIKE CONCAT('%',?,'%') created_at < ? ORDER BY created_at DESC LIMIT 50`, query, until)
 	}
@@ -613,10 +607,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		tweetsTmpl(w,tweets)
+		tweetsTmpl(w, tweets)
 		return
 	}
-	searchTmpl(w,name, tweets, query)
+	searchTmpl(w, name, tweets, query)
 }
 
 func js(w http.ResponseWriter, r *http.Request) {
