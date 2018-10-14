@@ -491,9 +491,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC`)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE text LIKE CONCAT('%',?,'%') ORDER BY created_at DESC LIMIT 50`,query)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC`, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE text LIKE CONCAT('%',?,'%') created_at < ? ORDER BY created_at DESC LIMIT 50`, query, until)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -503,7 +503,6 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
 		return
 	}
-	defer rows.Close()
 
 	tweets := make([]*Tweet, 0)
 	for rows.Next() {
@@ -511,6 +510,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
 		if err != nil && err != sql.ErrNoRows {
 			badRequest(w)
+			rows.Close()
 			return
 		}
 		t.HTML = htmlify(t.Text)
@@ -518,16 +518,15 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		t.UserName = getUserName(t.UserID)
 		if t.UserName == "" {
 			badRequest(w)
+			rows.Close()
 			return
 		}
-		if strings.Index(t.HTML, query) != -1 {
-			tweets = append(tweets, &t)
-		}
-
-		if len(tweets) == perPage {
+		tweets = append(tweets, &t)
+		if len(tweets) >= perPage {
 			break
 		}
 	}
+	rows.Close()
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
