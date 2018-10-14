@@ -536,9 +536,9 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`, userID)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY id DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 50`, userID, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY id DESC LIMIT 50`, userID, until)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -604,9 +604,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC`)
+		rows, err = db.Query(`SELECT * FROM tweets ORDER BY id DESC`)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC`, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY id DESC`, until)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
