@@ -637,7 +637,7 @@ func main() {
 		for _, friend := range friends {
 			var friend_id int64
 			db.QueryRow(`SELECT id FROM users where name = ?`, friend).Scan(&friend_id)
-			db.Exec(`INSERT INTO follows (src, dst) SELECT VALUES (?, ?)`, id, friend_id)
+			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, id, friend_id)
 		}
 	}
 
