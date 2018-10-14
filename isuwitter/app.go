@@ -117,7 +117,6 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		name = getUserName(userID.(int))
 	}
-
 	if name == "" {
 		flush, _ := session.Values["flush"].(string)
 		session := getSession(w, r)
@@ -126,128 +125,13 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		indexTmpl(w, name, make([]*Tweet, 0), flush)
 		return
 	}
-
-	var tx *sql.Tx
-	var err error
-	i := 0
 	tweets := make([]*Tweet, 0, perPage)
-	for {
-		tx, err = db.Begin()
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			i++
-			if i > 10 {
-				badRequest(w)
-				log.Println(err)
-				return
-			}
-			log.Println("Failed to get tx. continue...")
-			continue
-		}
-		break
-	}
-
-	until := r.URL.Query().Get("until")
-	var rows *sql.Rows
-	if until == "" {
-		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, userID)
-	} else {
-		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
-	}
-
-	if err != nil && err != sql.ErrNoRows {
-		tx.Rollback()
-		badRequest(w)
-		log.Println(err)
-		return
-	}
-
-	for rows.Next() {
+	for i := 0 ; i < perPage ; i++{
 		t := Tweet{}
-		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
-		if err != nil && err != sql.ErrNoRows {
-			tx.Rollback()
-			badRequest(w)
-			log.Println(err)
-			return
-		}
-		t.HTML = htmlify(t.Text)
-		t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
-
-		t.UserName = getUserName(t.UserID)
-		if t.UserName == "" {
-			tx.Rollback()
-			badRequest(w)
-			log.Println(err)
-			return
-		}
+		t.HTML = "hoge"
+		t.Time = "2006-01-02 15:04:05"
+		t.UserName = "hoge"
 		tweets = append(tweets, &t)
-	}
-	rows.Close()
-
-	if len(tweets) < perPage {
-		var rows2 *sql.Rows
-		if until == "" {
-			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id ORDER BY tw.id DESC LIMIT ?`, userID, perPage)
-		} else {
-			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id AND tw.created_at < ? ORDER BY tw.id DESC LIMIT ?`, userID, until, perPage)
-		}
-
-		if err != nil {
-			if err == sql.ErrNoRows {
-				if tx.Commit() != nil {
-					badRequest(w)
-					log.Println(err)
-					return
-				}
-				http.NotFound(w, r)
-				return
-			}
-			tx.Rollback()
-			badRequest(w)
-			log.Println(err)
-			return
-		}
-
-		tweets = make([]*Tweet, 0, perPage)
-		for rows2.Next() {
-			t := Tweet{}
-			err := rows2.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
-			if err != nil && err != sql.ErrNoRows {
-				tx.Rollback()
-				badRequest(w)
-				log.Println(err)
-				return
-			}
-			t.HTML = htmlify(t.Text)
-			t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
-
-			t.UserName = getUserName(t.UserID)
-			if t.UserName == "" {
-				tx.Rollback()
-				badRequest(w)
-				log.Println(err)
-				return
-			}
-			tweets = append(tweets, &t)
-		}
-		rows2.Close()
-
-		for _, t := range tweets {
-			_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, userID, t.UserID, t.ID)
-			if err != nil {
-				tx.Rollback()
-				badRequest(w)
-				log.Println(err)
-				return
-			}
-		}
-	}
-
-	if tx.Commit() != nil {
-		badRequest(w)
-		log.Println(err)
-		return
 	}
 
 	add := r.URL.Query().Get("append")
