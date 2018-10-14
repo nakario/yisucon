@@ -145,9 +145,9 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me_id = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, userID)
+		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, name)
 	} else {
-		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me_id = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
+		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, name, until)
 	}
 
 	if err != nil {
@@ -198,10 +198,11 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
+	var u string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
-		u := getUserName(userID.(int))
+		u = getUserName(userID.(int))
 		if u == "" {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -214,6 +215,50 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 	text := r.FormValue("text")
 	if text == "" {
 		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	var tx *sql.Tx
+	i := 0
+	for {
+		tx, err := db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+
+		res, err := db.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		id, err := res.LastInsertId()
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.src = ?`, id, u)
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		break
+	}
+
+	if tx.Commit() != nil {
+		badRequest(w)
 		return
 	}
 
@@ -271,8 +316,42 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userName, r.FormValue("user"))
-	if err != nil {
+	followUser := r.FormValue("user")
+	followID := getuserID(followUser)
+
+	var tx *sql.Tx
+	i := 0
+	for {
+		tx, err := db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+
+		_, err = tx.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userName, followUser)
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT ?, ?, tweets.id FROM tweets WHERE tweets.user_id = ?`, userName, followUser, followID)
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		break
+	}
+
+	if tx.Commit() != nil {
 		badRequest(w)
 		return
 	}
@@ -296,8 +375,39 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userName, r.FormValue("user"))
-	if err != nil {
+	var tx *sql.Tx
+	i := 0
+	for {
+		tx, err := db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+
+		_, err = tx.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userName, r.FormValue("user"))
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		_, err = tx.Exec(`DELETE FROM timelines WHERE me = ? AND postuser = ?`, userName, r.FormValue("user"))
+		if err != nil {
+			badRequest(w)
+			tx.Rollback()
+			return
+		}
+
+		break
+	}
+
+	if tx.Commit() != nil {
 		badRequest(w)
 		return
 	}
