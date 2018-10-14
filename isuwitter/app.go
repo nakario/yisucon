@@ -153,7 +153,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	if until == "" {
 		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC limit ?`, perPage)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC`, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage)
 	}
 
 	if err != nil {
