@@ -605,7 +605,7 @@ func main() {
 		if err != nil {
 			log.Fatalln("scan error")
 		}
-		db.QueryRow(`SELECT name FROM users where id = ?`, user_id).Scan(&t.UserName)
+		db.QueryRow(`SELECT name FROM users where id = ?`, t.UserID).Scan(&t.UserName)
 
 		followers, err := db.Query(`SELECT src FROM follows where dst = ?`, t.UserName)
 		for followers.Next() {
