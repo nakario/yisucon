@@ -7,8 +7,8 @@ func tweetsTmpl(rw http.ResponseWriter,tweets []*Tweet) {
     if !ok { return }
     w.WriteHeader(http.StatusOK)
     w.Header()["Content-Type"] = []string{"text/html; charset=utf-8"}
-    for _,tweet := range tweets  {
-        w.Write([]byte(`<div class="tweet" data-time="`))
+    for _ , tweet := range tweets  {
+        w.Write([]byte(` <div class="tweet" data-time="`))
         w.Write([]byte(tweet.Time))
         w.Write([]byte(`"><p><a href="/`))
         w.Write([]byte(tweet.UserName))
@@ -18,7 +18,7 @@ func tweetsTmpl(rw http.ResponseWriter,tweets []*Tweet) {
         w.Write([]byte(tweet.HTML))
         w.Write([]byte(`</p><p class="time">`))
         w.Write([]byte(tweet.Time))
-        w.Write([]byte(`</p></div>`))
+        w.Write([]byte(`</p></div> `))
     }
 }
 
