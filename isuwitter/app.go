@@ -607,7 +607,7 @@ func main() {
 		if err != nil {
 			log.Fatalln("scan error")
 		}
-		log.Fatalln(name)
+		log.Println(name)
 		friends, err := loadFriends(name)
 		if err != nil {
 			log.Fatalln("loadFriends error")
