@@ -609,6 +609,12 @@ func main() {
 	})
 
 	r := mux.NewRouter()
+
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+
 	r.HandleFunc("/initialize", initializeHandler).Methods("GET")
 
 	l := r.PathPrefix("/login").Subrouter()
@@ -634,11 +640,6 @@ func main() {
 	i := r.PathPrefix("/").Subrouter()
 	i.Methods("GET").HandlerFunc(topHandler)
 	i.Methods("POST").HandlerFunc(tweetPostHandler)
-
-	r.HandleFunc("/debug/pprof/", pprof.Index)
-	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
