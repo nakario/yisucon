@@ -1,6 +1,6 @@
 cd /var/www/webapp
 export GOPATH=/var/www/webapp
-ln -sfv go src
+#ln -sfv go src
 cd /var/www/webapp/go/isutomo
 glide install
 go build
