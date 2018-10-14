@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -45,7 +43,6 @@ const (
 	sessionName     = "isuwitter_session"
 	sessionSecret   = "isuwitter"
 	perPage         = 50
-	isutomoEndpoint = "http://localhost:8081"
 )
 
 var (
@@ -107,20 +104,6 @@ func htmlify(tweet string) string {
 	return tweet
 }
 
-func loadFriends(name string) ([]string, error) {
-	resp, err := http.DefaultClient.Get(isutomoEndpoint + pathURIEscape("/"+name))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var data struct {
-		Result []string `json:"friends"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&data)
-	return data.Result, err
-}
-
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := db.Exec(`DELETE FROM tweets WHERE id > 100000`)
 	if err != nil {
@@ -133,13 +116,6 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
 		return
 	}
-
-	resp, err := http.Get(fmt.Sprintf("%s/initialize", isutomoEndpoint))
-	if err != nil {
-		badRequest(w)
-		return
-	}
-	defer resp.Body.Close()
 
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})
 }
@@ -172,9 +148,9 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets ORDER BY created_at DESC`)
+		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me_id = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC`, until)
+		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me_id = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
 	}
 
 	if err != nil {
@@ -186,12 +162,6 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-
-	result, err := loadFriends(name)
-	if err != nil {
-		badRequest(w)
-		return
-	}
 
 	tweets := make([]*Tweet, 0)
 	for rows.Next() {
@@ -209,16 +179,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 			badRequest(w)
 			return
 		}
-
-		for _, x := range result {
-			if x == t.UserName {
-				tweets = append(tweets, &t)
-				break
-			}
-		}
-		if len(tweets) == perPage {
-			break
-		}
+		tweets = append(tweets, &t)
 	}
 
 	add := r.URL.Query().Get("append")
@@ -313,17 +274,8 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonStr := `{"user":"` + r.FormValue("user") + `"}`
-	req, err := http.NewRequest(http.MethodPost, isutomoEndpoint+pathURIEscape("/"+userName), bytes.NewBuffer([]byte(jsonStr)))
-
+	_, err := db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userName, r.FormValue("user"))
 	if err != nil {
-		badRequest(w)
-		return
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-
-	if err != nil || resp.StatusCode != 200 {
 		badRequest(w)
 		return
 	}
@@ -347,17 +299,8 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonStr := `{"user":"` + r.FormValue("user") + `"}`
-	req, err := http.NewRequest(http.MethodDelete, isutomoEndpoint+pathURIEscape("/"+userName), bytes.NewBuffer([]byte(jsonStr)))
-
+	_, err := db.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userName, r.FormValue("user"))
 	if err != nil {
-		badRequest(w)
-		return
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-
-	if err != nil || resp.StatusCode != 200 {
 		badRequest(w)
 		return
 	}
@@ -401,18 +344,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	isFriend := false
 	if name != "" {
-		result, err := loadFriends(name)
-		if err != nil {
-			badRequest(w)
-			return
-		}
-
-		for _, x := range result {
-			if x == user {
-				isFriend = true
-				break
-			}
-		}
+		db.QueryRow(`SELECT EXISTS(SELECT * FROM follows WHERE src = ? AND dst = ? LIMIT 1)`, name, user).Scan(&isFriend)
 	}
 
 	until := r.URL.Query().Get("until")
