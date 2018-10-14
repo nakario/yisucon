@@ -595,7 +595,7 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
-	rows, err := db.Query(`SELECT id, user_id FROM tweets`)
+	/*rows, err := db.Query(`SELECT id, user_id FROM tweets`)
 	if err != nil {
 		log.Fatalln("select error")
 	}
@@ -614,9 +614,30 @@ func main() {
 			if err != nil {
 				log.Fatalln("scan2 error")
 			}
-			db.Exec(`INSERT INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, follow, t.UserName, t.ID)
+			db.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, t.id FROM tweets as t inner join users as u on u.id = t.user_id inner join follows as f on f.dst = u.name`, follow, t.UserName, t.ID)
+		}
+	}*/
+	// create table data
+	rows, err := db.Query(`SELECT name FROM users`)
+	if err != nil {
+		log.Fatalln("select error")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		err = rows.Scan(&name)
+		if err != nil {
+			log.Fatalln("scan error")
+		}
+		friends, err := loadFriends(name)
+		if err != nil {
+			log.Fatalln("loadFriends error")
+		}
+		for _, friend := range friends {
+			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
 		}
 	}
+
 	defer rows.Close()
 
 	re = render.New(render.Options{
