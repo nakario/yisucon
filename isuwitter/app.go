@@ -600,8 +600,14 @@ func main() {
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		_ = rows.Scan(&name)
-		friends, _ := loadFriends(name)
+		err = rows.Scan(&name)
+		if err != nil {
+			log.Fatalln("scan error")
+		}
+		friends, err := loadFriends(name)
+		if err != nil {
+			log.Fatalln("loadFriends error")
+		}
 		for _, friend := range friends {
 			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
 		}
