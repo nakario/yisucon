@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"html/template"
 	"log"
 	"net/http"
 	"net/http/pprof"
@@ -157,14 +156,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		session := getSession(w, r)
 		session.Options = &sessions.Options{MaxAge: -1}
 		session.Save(r, w)
-
-		re.HTML(w, http.StatusOK, "index", struct {
-			Name  string
-			Flush string
-		}{
-			name,
-			flush,
-		})
+		indexTmpl(w,name,make([]*Tweet,0),flush)
 		return
 	}
 
@@ -223,20 +215,10 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
-
-	re.HTML(w, http.StatusOK, "index", struct {
-		Name   string
-		Tweets []*Tweet
-	}{
-		name, tweets,
-	})
+	indexTmpl(w,name,tweets,"")
 }
 
 func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -453,23 +435,11 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
 
-	re.HTML(w, http.StatusOK, "user", struct {
-		Name     string
-		User     string
-		Tweets   []*Tweet
-		IsFriend bool
-		Mypage   bool
-	}{
-		name, user, tweets, isFriend, mypage,
-	})
+	userTmpl(w,name, user, tweets, isFriend, mypage)
 }
 
 func searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -530,21 +500,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	add := r.URL.Query().Get("append")
 	if add != "" {
-		re.HTML(w, http.StatusOK, "_tweets", struct {
-			Tweets []*Tweet
-		}{
-			tweets,
-		})
+		tweetsTmpl(w,tweets)
 		return
 	}
-
-	re.HTML(w, http.StatusOK, "search", struct {
-		Name   string
-		Tweets []*Tweet
-		Query  string
-	}{
-		name, tweets, query,
-	})
+	searchTmpl(w,name, tweets, query)
 }
 
 func js(w http.ResponseWriter, r *http.Request) {
@@ -613,17 +572,7 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
-	re = render.New(render.Options{
-		Directory: "views",
-		Funcs: []template.FuncMap{
-			{
-				"raw": func(text string) template.HTML {
-					return template.HTML(text)
-				},
-				"add": func(a, b int) int { return a + b },
-			},
-		},
-	})
+	re = render.New()
 
 	r := mux.NewRouter()
 
