@@ -67,7 +67,7 @@ func getuserID(name string) int {
 }
 
 func getUserName(id int) string {
-	if id < 0 || id >= len(users) {
+	if id <= 0 || id > len(users) {
 		return ""
 	}
 	return users[id-1].Name
