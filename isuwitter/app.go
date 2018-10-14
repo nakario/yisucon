@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"regexp"
@@ -66,13 +67,10 @@ func getuserID(name string) int {
 }
 
 func getUserName(id int) string {
-	row := db.QueryRow(`SELECT name FROM users WHERE id = ?`, id)
-	user := User{}
-	err := row.Scan(&user.Name)
-	if err != nil {
+	if id <= 0 || id > len(users) {
 		return ""
 	}
-	return user.Name
+	return users[id-1].Name
 }
 
 func htmlify(tweet string) string {
@@ -609,6 +607,11 @@ func main() {
 	})
 
 	r := mux.NewRouter()
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+
 	r.HandleFunc("/initialize", initializeHandler).Methods("GET")
 
 	l := r.PathPrefix("/login").Subrouter()

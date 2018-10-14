@@ -1,0 +1,6 @@
+vendor/
+isutomo
+!isutomo/
+isuwitter
+!isuwitter/
+isuwitter/public
