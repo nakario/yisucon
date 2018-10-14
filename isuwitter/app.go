@@ -596,7 +596,10 @@ func main() {
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
 	// create table data
-	rows, _ := db.Query(`SELECT name FROM users`)
+	rows, err := db.Query(`SELECT name FROM users`)
+	if err != nil {
+		log.Fatalln("select error")
+	}
 	defer rows.Close()
 	for rows.Next() {
 		var name string
