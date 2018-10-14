@@ -595,7 +595,7 @@ func main() {
 
 	store = sessions.NewFilesystemStore("", []byte(sessionSecret))
 
-	rows, err := db.Query(`SELECT id, user_id FROM tweets`)
+	/*rows, err := db.Query(`SELECT id, user_id FROM tweets`)
 	if err != nil {
 		log.Fatalln("select error")
 	}
@@ -617,7 +617,7 @@ func main() {
 			db.Exec(`INSERT INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, follow, t.UserName, t.ID)
 		}
 	}
-	defer rows.Close()
+	defer rows.Close()*/
 
 	re = render.New(render.Options{
 		Directory: "views",
