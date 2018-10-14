@@ -618,14 +618,14 @@ func main() {
 		}
 	}*/
 	// create table data
-	rows, err := db.Query(`SELECT name FROM users`)
+	rows, err := db.Query(`SELECT id FROM users`)
 	if err != nil {
 		log.Fatalln("select error")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var name string
-		err = rows.Scan(&name)
+		var id int64
+		err = rows.Scan(&id)
 		if err != nil {
 			log.Fatalln("scan error")
 		}
@@ -634,7 +634,9 @@ func main() {
 			log.Fatalln("loadFriends error")
 		}
 		for _, friend := range friends {
-			db.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, name, friend)
+			var friend_id int64
+			db.QueryRow(`SELECT id FROM users where name = ?`, friend).Scan(&friend_id)
+			db.Exec(`INSERT INTO follows (src, dst) SELECT VALUES (?, ?)`, id, friend_id)
 		}
 	}
 
