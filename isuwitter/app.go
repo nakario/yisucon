@@ -40,6 +40,7 @@ type User struct {
 const (
 	sessionName     = "isuwitter_session"
 	sessionSecret   = "isuwitter"
+	perPage         = 50
 )
 
 var (
@@ -159,7 +160,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tweets := make([]*Tweet, 0)
+	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
@@ -343,9 +344,9 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY created_at DESC`, userID)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY created_at DESC`, userID, until)
+		rows, err = db.Query(`SELECT * FROM tweets WHERE user_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 50`, userID, until)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -357,7 +358,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tweets := make([]*Tweet, 0)
+	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
@@ -369,10 +370,6 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
 		t.UserName = user
 		tweets = append(tweets, &t)
-
-		if len(tweets) == perPage {
-			break
-		}
 	}
 
 	add := r.URL.Query().Get("append")
@@ -429,7 +426,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tweets := make([]*Tweet, 0)
+	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
