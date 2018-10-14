@@ -141,30 +141,52 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var tx *sql.Tx
+	var err error
+	i := 0
+	tweets := make([]*Tweet, 0, perPage)
+	for {
+		tx, err = db.Begin()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			i++
+			if i > 10 {
+				badRequest(w)
+				return
+			}
+			log.Println("Failed to get tx. continue...")
+			continue
+		}
+	}
+
 	until := r.URL.Query().Get("until")
 	var rows *sql.Rows
-	var err error
 	if until == "" {
-		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, name)
+		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id ORDER BY tl.tweet_id DESC LIMIT 50`, userID)
 	} else {
-		rows, err = db.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, name, until)
+		rows, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN timelines as tl WHERE tl.me = ? AND tw.id = tl.tweet_id AND tw.created_at < ? ORDER BY tl.tweet_id DESC LIMIT 50`, userID, until)
 	}
 
 	if err != nil {
 		if err == sql.ErrNoRows {
+			if tx.Commit() != nil {
+				badRequest(w)
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
+		tx.Rollback()
 		badRequest(w)
 		return
 	}
 	defer rows.Close()
 
-	tweets := make([]*Tweet, 0, perPage)
 	for rows.Next() {
 		t := Tweet{}
 		err := rows.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
 		if err != nil && err != sql.ErrNoRows {
+			tx.Rollback()
 			badRequest(w)
 			return
 		}
@@ -173,10 +195,68 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 
 		t.UserName = getUserName(t.UserID)
 		if t.UserName == "" {
+			tx.Rollback()
 			badRequest(w)
 			return
 		}
 		tweets = append(tweets, &t)
+	}
+
+	if len(tweets) < perPage {
+		var rows2 *sql.Rows
+		if until == "" {
+			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id ORDER BY tw.id DESC LIMIT ?`, userID, perPage)
+		} else {
+			rows2, err = tx.Query(`SELECT tw.id, tw.user_id, tw.text, tw.created_at FROM tweets as tw INNER JOIN follows as f WHERE f.src = ? AND f.dst = tw.user_id AND tw.created_at < ? ORDER BY tw.id DESC LIMIT ?`, userID, until, perPage)
+		}
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				if tx.Commit() != nil {
+					badRequest(w)
+					return
+				}
+				http.NotFound(w, r)
+				return
+			}
+			tx.Rollback()
+			badRequest(w)
+			return
+		}
+		defer rows2.Close()
+
+		tweets = make([]*Tweet, 0, perPage)
+		for rows2.Next() {
+			t := Tweet{}
+			err := rows2.Scan(&t.ID, &t.UserID, &t.Text, &t.CreatedAt)
+			if err != nil && err != sql.ErrNoRows {
+				tx.Rollback()
+				badRequest(w)
+				return
+			}
+			t.HTML = htmlify(t.Text)
+			t.Time = t.CreatedAt.Format("2006-01-02 15:04:05")
+
+			t.UserName = getUserName(t.UserID)
+			if t.UserName == "" {
+				tx.Rollback()
+				badRequest(w)
+				return
+			}
+			tweets = append(tweets, &t)
+
+			_, err = tx.Exec(`INSERT IGNORE INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, userID, t.UserID, t.ID)
+			if err != nil {
+				tx.Rollback()
+				badRequest(w)
+				return
+			}
+		}
+	}
+
+	if tx.Commit() != nil {
+		badRequest(w)
+		return
 	}
 
 	add := r.URL.Query().Get("append")
@@ -219,9 +299,10 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var tx *sql.Tx
+	var err error
 	i := 0
 	for {
-		tx, err := db.Begin()
+		tx, err = db.Begin()
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			i++
@@ -232,38 +313,30 @@ func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
-
-		res, err := db.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
-
-		id, err := res.LastInsertId()
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
-
-		_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.src = ?`, id, u)
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
-
-		break
 	}
 
-	if tx.Commit() != nil {
+	res, err := tx.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
+	if err != nil {
 		badRequest(w)
+		tx.Rollback()
 		return
 	}
 
-	_, err := db.Exec(`INSERT INTO tweets (user_id, text, created_at) VALUES (?, ?, NOW())`, userID, text)
+	id, err := res.LastInsertId()
 	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
+
+	_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT f.src, f.dst, ? FROM follows as f WHERE f.src = ?`, id, userID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
+
+	if tx.Commit() != nil {
 		badRequest(w)
 		return
 	}
@@ -301,7 +374,6 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func followHandler(w http.ResponseWriter, r *http.Request) {
-	var userName string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
@@ -310,7 +382,6 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		userName = u
 	} else {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
@@ -320,9 +391,10 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	followID := getuserID(followUser)
 
 	var tx *sql.Tx
+	var err error
 	i := 0
 	for {
-		tx, err := db.Begin()
+		tx, err = db.Begin()
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			i++
@@ -333,22 +405,20 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+	}
 
-		_, err = tx.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userName, followUser)
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
+	_, err = tx.Exec(`INSERT INTO follows (src, dst) VALUES (?, ?)`, userID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
 
-		_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT ?, ?, tweets.id FROM tweets WHERE tweets.user_id = ?`, userName, followUser, followID)
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
-
-		break
+	_, err = tx.Exec(`INSERT INTO timelines (me, postuser, tweet_id) SELECT ?, ?, tweets.id FROM tweets WHERE tweets.user_id = ?`, userID, followID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
 	}
 
 	if tx.Commit() != nil {
@@ -360,7 +430,6 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func unfollowHandler(w http.ResponseWriter, r *http.Request) {
-	var userName string
 	session := getSession(w, r)
 	userID, ok := session.Values["user_id"]
 	if ok {
@@ -369,16 +438,18 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		userName = u
 	} else {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 
+	followID := getuserID(r.FormValue("user"))
+
 	var tx *sql.Tx
+	var err error
 	i := 0
 	for {
-		tx, err := db.Begin()
+		tx, err = db.Begin()
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			i++
@@ -389,22 +460,20 @@ func unfollowHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Failed to get tx. continue...")
 			continue
 		}
+	}
 
-		_, err = tx.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userName, r.FormValue("user"))
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
+	_, err = tx.Exec(`DELETE FROM follows WHERE src = ? AND dst = ?`, userID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
+	}
 
-		_, err = tx.Exec(`DELETE FROM timelines WHERE me = ? AND postuser = ?`, userName, r.FormValue("user"))
-		if err != nil {
-			badRequest(w)
-			tx.Rollback()
-			return
-		}
-
-		break
+	_, err = tx.Exec(`DELETE FROM timelines WHERE me = ? AND postuser = ?`, userID, followID)
+	if err != nil {
+		badRequest(w)
+		tx.Rollback()
+		return
 	}
 
 	if tx.Commit() != nil {
@@ -447,7 +516,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	isFriend := false
 	if name != "" {
-		db.QueryRow(`SELECT EXISTS(SELECT * FROM follows WHERE src = ? AND dst = ? LIMIT 1)`, name, user).Scan(&isFriend)
+		db.QueryRow(`SELECT EXISTS(SELECT * FROM follows WHERE src = ? AND dst = ? LIMIT 1)`, sessionUID, userID).Scan(&isFriend)
 	}
 
 	until := r.URL.Query().Get("until")
