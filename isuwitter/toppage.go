@@ -5,14 +5,22 @@ import (
 	"github.com/unrolled/render"
 )
 
+
 func burnOutTopPage(render *render.Render,w http.ResponseWriter, name  string, flush string, Tweets []*Tweet) {
-	if hw, ok := w.(http.ResponseWriter); !ok {
+	hw, ok := w.(http.ResponseWriter);
+	if !ok {
 		return
 	}
+	hw.WriteHeader(http.StatusOK)
+	hw.Header()["Content-Type"] = []string{"text/html; charset=utf-8"}
+	hw.Write([]byte("<!DOCTYPE html><html>からのぺーじだにょ</html>"))
+	// WriteString(hw , "<!DOCTYPE html><html></html>")
+	// if !hw.Written(){
+	// 	hw.size = 0
+	// 	hw.WriteHeader(http.StatusOK)
+	// }
 
-	w.Header()["Content-Type"] = []string{"text/html; charset=utf-8"}
-	w.WriteString("<!DOCTYPE html><html></html>")
-	w.WriteHeaderNow()
+	// hw.WriteHeaderNow()
 	// h := HTML{
 	// 	Head: Head{
 	// 		ContentType: render.opt.HTMLContentType + render.compiledCharset,

@@ -230,13 +230,13 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	re.HTML(w, http.StatusOK, "index", struct {
-		Name   string
-		Tweets []*Tweet
-	}{
-		name, tweets,
-	})
+	burnOutTopPage(re,w,name,"", tweets)
+	// re.HTML(w, http.StatusOK, "index", struct {
+	// 	Name   string
+	// 	Tweets []*Tweet
+	// }{
+	// 	name, tweets,
+	// })
 }
 
 func tweetPostHandler(w http.ResponseWriter, r *http.Request) {
