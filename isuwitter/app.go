@@ -612,7 +612,7 @@ func main() {
 			var follow string
 			err = rows.Scan(&follow)
 			if err != nil {
-				log.Fatalln("scan error")
+				log.Fatalln("scan2 error")
 			}
 			db.Exec(`INSERT INTO timelines (me, postuser, tweet_id) VALUES (?, ?, ?)`, follow, t.UserName, t.ID)
 		}
