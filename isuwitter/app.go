@@ -476,6 +476,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rows, err = db.Query(`SELECT * FROM tweets WHERE created_at < ? ORDER BY created_at DESC limit ?`, until, perPage)
 	}
+	// hoge
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.NotFound(w, r)
